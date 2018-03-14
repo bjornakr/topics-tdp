@@ -36,39 +36,17 @@ validContentCodes = [
     "71", "72", "73", "81", "82", "83", "91", "92", "93"
     ] :: [T.Text]
 
-parseObservationCode :: T.Text -> Either Error ContentCode
-parseObservationCode oc =    
+parseContentCode :: T.Text -> Either Error ContentCode
+parseContentCode oc =    
     let 
-        invalidObservationCode val = "Invalid ObservationCode: " <> val <> "."
-        --toDecimal val =
-        --    case (decimal val) of
-        --        Right(v, rest) -> Right(v)
-        --        Left(_) -> Left $ Error (invalidObservationCode val)
-
         validate val = 
             if (elem val validContentCodes)
                 then Right(val)
-                else Left $ Error (invalidObservationCode val)
-
-
-
-            --if (val > 0 && val < 100)
-            --    then Right(val)
-            --    else Left $ Error (invalidObservationCode val)
+                else Left $ Error ("Invalid ObservationCode: " <> val <> ".")
     in
         fmap ContentCode (validate oc) 
-        --do
-        --    s0 <- toDecimal oc
-        --    s1 <- validate(s0)
-        --    return $ ContentCode s1
-
---parseObservationUnit (a:b:c:d:e:[]) =
 
 
-
-
-test = "zupu" :: T.Text
 
 main = do
-    let a = "Hei" :: T.Text
     putStrLn("Hello world!")
