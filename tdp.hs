@@ -117,17 +117,17 @@ parseObservationUnit :: T.Text -> Either Error ObservationUnit
 parseObservationUnit val =
     let 
         parts = T.words val
-        oc = case atMay parts 1 of
-                Nothing -> Left $ Error("Missing ObservationCode in: " <> val <> ".")
-                Just v -> parseObservationCode v
-        ot = case atMay parts 2 of
-                Nothing -> Left $ Error("Missing ObservationTime in: " <> val <> ".")
-                Just v -> parseObservationTime v
     in
     do
-        s0 <- oc
-        s1 <- ot
-        return $ ObservationUnit s0 s1
+        oc <- case atMay parts 1 of
+                Nothing -> Left $ Error("Missing ObservationCode in: " <> val <> ".")
+                Just v -> parseObservationCode v
+
+        ot <- case atMay parts 2 of
+                Nothing -> Left $ Error("Missing ObservationTime in: " <> val <> ".")
+                Just v -> parseObservationTime v
+
+        return $ ObservationUnit oc ot
 
 
 main = do
