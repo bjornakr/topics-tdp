@@ -1,11 +1,13 @@
 #!/usr/bin/env stack
--- stack runghc --resolver lts-11.0 --install-ghc --package text
+-- stack runghc --resolver lts-11.0 --install-ghc --package text --package safe
 
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.Text as T
 import Data.Text.Read (decimal, rational)
 import Data.Monoid
+import Safe
+
 
 data TaskId = Task1 | Task2 | Task3a | Task3b | Task4 | Task5
 data ChildId = ChildId Int
@@ -25,11 +27,27 @@ data Initiator = Initiator Subject deriving (Show)
 data ContentCode = ContentCode T.Text deriving (Show)
 data Reciprocator = Reciprocator Subject | ReciprocatorObject deriving (Show)
 data Valence = Valence T.Text deriving (Show) -- a number in the range [1,8]
-data ObservationTime = ObservationTime Rational
+data ObservationTime = ObservationTime Double deriving (Show)
 data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence deriving (Show)
-data ObservationUnit = ObservationUnit ObservationCode ObservationTime
+data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving (Show)
 
 data Error = Error T.Text deriving (Show)
+
+
+-- Header
+--Task ChildID Age      Observer    FMembers        Date     Time   dbl_int is_cut                                 
+-- 1   1366    12       OV          13              08/13/10 15:18  1       0
+
+--Data
+  --0  -00100    40.0
+  --1   17232    40.03
+  --1   38112    42.2
+  --1   17232    42.6
+  --1   34112    43.56
+  --1   17232    44.13
+  --1   34112    46.46
+  --1   17232    47.03
+  --1   31112    49.76
 
 
 validContentCodes = [
@@ -85,6 +103,31 @@ parseObservationCode val =
             Left $ Error ("Invalid observation code: " <> (T.pack other) <> ".")
     in
         proc (T.unpack val)
+
+parseObservationTime :: T.Text -> Either Error ObservationTime
+parseObservationTime val =
+    case (Data.Text.Read.rational val) of
+        Left(_) -> Left $ Error("Invalid ObservationTime: " <> val <> ".")
+        Right((v,_)) -> Right $ ObservationTime v
+
+
+
+parseObservationUnit :: T.Text -> Either Error ObservationUnit
+-- input e.g:   1   34112    46.46
+parseObservationUnit val =
+    let 
+        parts = T.words val
+        oc = case atMay parts 1 of
+                Nothing -> Left $ Error("Missing ObservationCode in: " <> val <> ".")
+                Just v -> parseObservationCode v
+        ot = case atMay parts 2 of
+                Nothing -> Left $ Error("Missing ObservationTime in: " <> val <> ".")
+                Just v -> parseObservationTime v
+    in
+    do
+        s0 <- oc
+        s1 <- ot
+        return $ ObservationUnit s0 s1
 
 
 main = do
