@@ -1,35 +1,36 @@
 #!/usr/bin/env stack
 -- stack runghc --resolver lts-11.0 --install-ghc --package text --package safe
 
+-- Topics observational data processor
+-- TOPDAP
+
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.Text as T
 import Data.Text.Read (decimal, rational)
 import Data.Monoid
 import Safe
+import Data.Either
 
+data Task = Task1 | Task2 | Task3a | Task3b | Task4 | Task5 deriving (Show)
+data ChildId = ChildId Int deriving (Show)
+data AgeInMonths = Age12 | Age24 | Age36 deriving (Show)
+data Observer = Observer T.Text deriving (Show)
+data Parent = Mother | Father deriving (Show)
+data Child = Boy | Girl deriving (Show)
+data Family = Family Parent Child deriving (Show)
+data Header = Header Task ChildId AgeInMonths Observer Family deriving (Show)
 
-data TaskId = Task1 | Task2 | Task3a | Task3b | Task4 | Task5
-data ChildId = ChildId Int
-data AgeInMonths = Age12 | Age24 | Age36
-data Observer = Observer String
-data ParentRole = Mother | Father
-data ChildGender = Boy | Girl
--- data Parent = Mother | Father
-data Subject = Parent | Child deriving (Show)
--- data Child = Boy | Girl
-data Header = Header ChildId AgeInMonths Observer ParentRole ChildGender
-data Record = Record Header [Task]
-data Task = Task TaskId [ObservationUnit]
-
-
-data Initiator = Initiator Subject deriving (Show)
-data ContentCode = ContentCode T.Text deriving (Show)
+data Subject = Parent | Child deriving (Show, Eq)
+data Initiator = Initiator Subject deriving (Show, Eq)
+data ContentCode = ContentCode T.Text deriving (Show, Eq)
 data Reciprocator = Reciprocator Subject | ReciprocatorObject deriving (Show)
-data Valence = Valence T.Text deriving (Show) -- a number in the range [1,8]
+data Valence = Valence T.Text deriving (Show, Eq) -- a number in the range [1,8]
 data ObservationTime = ObservationTime Double deriving (Show)
 data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence deriving (Show)
 data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving (Show)
+
+
 
 data Error = Error T.Text deriving (Show)
 
@@ -106,7 +107,7 @@ parseObservationCode val =
 
 parseObservationTime :: T.Text -> Either Error ObservationTime
 parseObservationTime val =
-    case (Data.Text.Read.rational val) of
+    case (rational val) of
         Left(_) -> Left $ Error("Invalid ObservationTime: " <> val <> ".")
         Right((v,_)) -> Right $ ObservationTime v
 
@@ -130,5 +131,251 @@ parseObservationUnit val =
         return $ ObservationUnit oc ot
 
 
+
+
+
+
+
+
+
+
+parseTask :: T.Text -> Either Error Task
+parseTask val =
+    case val of
+        "1" -> Right Task1
+        "2" -> Right Task2
+        "3a" -> Right Task3a
+        "3b" -> Right Task3b
+        "4" -> Right Task4
+        "5" -> Right Task5
+        _ -> Left $ Error("Invalid task: " <> val <> ".")
+
+parseChildId :: T.Text -> Either Error ChildId
+parseChildId val =
+    case decimal val of
+        Right((i, "")) -> Right $ ChildId i        
+        _ -> Left $ Error("Invalid ChildId: " <> val <> ".")
+
+parseAge :: T.Text -> Either Error AgeInMonths
+parseAge val =
+    case val of
+        "12" -> Right Age12
+        "24" -> Right Age24
+        "36" -> Right Age36
+        "_" -> Left $ Error("Invalid age: " <> val <> ".")
+
+parseObserver :: T.Text -> Either Error Observer
+parseObserver val =
+    if (T.length val) == 2
+        then Right (Observer val)
+        else Left $ Error("Invalid observer: " <> val <> ".")
+
+
+parseFamily :: T.Text -> Either Error Family
+parseFamily val =
+    case val of 
+        "12" -> Right $ Family Father Boy
+        "13" -> Right $ Family Mother Boy
+        "28" -> Right $ Family Father Girl
+        "38" -> Right $ Family Mother Girl
+        _ -> Left $ Error("Invalid Family: " <> val <> ".")
+
+
+parseHeader :: T.Text -> Either Error Header
+parseHeader val =
+    let 
+        parts = T.words val
+    in do
+        task <- case atMay parts 0 of
+                Nothing -> Left $ Error("Missing Task in: " <> val <> ".")
+                Just v -> parseTask v
+        childId <- case atMay parts 1 of
+                Nothing -> Left $ Error("Missing ChildId in: " <> val <> ".")
+                Just v -> parseChildId v
+        age <- case atMay parts 2 of
+                Nothing -> Left $ Error("Missing Age in: " <> val <> ".")
+                Just v -> parseAge v
+        observer <- case atMay parts 3 of
+                Nothing -> Left $ Error("Missing Observer in: " <> val <> ".")
+                Just v -> parseObserver v
+        family <- case atMay parts 4 of
+                Nothing -> Left $ Error("Missing Family in: " <> val <> ".")
+                Just v -> parseFamily v
+        
+        return $ Header task childId age observer family
+
+
+
+
+---data RecodeSequence = RecodeSequence WindowSizeInSecs [RecodeSpec]
+--data SequenceMatch = SequenceMatch [ObservationUnit]
+
+
+
+
+--rseq = RecodeSequence (WindowSizeInSecs 6) [rSpec1, rSpec2]
+
+--data State = State [RecodeSpec] [ObservationUnit] -- SequenceMatch
+--data FindResult = FindResult [ObservationUnit]
+
+
+-- data FindSpec = RecodeSpec WindowSizeInSecs [ObservationUnit]
+
+-- data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving (Show)
+
+-- data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence deriving (Show)
+
+
+isMatch :: RecodeSpec -> ObservationUnit -> Bool
+isMatch 
+    (RecodeSpec initiatorSpec contentCodesSpec valencesSpec)
+    obsUnit@(ObservationUnit (ObservationCode initiator contentCode _ valence) _) =
+        initiator == initiatorSpec
+            && (elem contentCode contentCodesSpec)
+            && (elem valence valencesSpec)
+
+
+--isMatch :: [RecodeSpec] -> ObservationUnit -> Bool
+--isMatch [] _ = False
+--isMatch (r:rs) ou = 
+--    if isMatch r ou
+--        then True
+--        else isMatch rs obsUnit
+
+data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]
+data WindowSizeInSecs = WindowSizeInSecs Double
+type StartRecodeSpec = RecodeSpec
+type StopRecodeSpec = RecodeSpec
+--data OpenSequence = OpenSequence [ObservationUnit]
+data RecodeSequence = RecodeSequence StartRecodeSpec StopRecodeSpec WindowSizeInSecs
+data FoundSequence = EmptySequence | OpenSequence ObservationUnit | ClosedSequence ObservationUnit ObservationUnit deriving (Show)
+
+
+units = fromRight [] (mapM parseObservationUnit [
+    "  1   24281    0.00",
+    "  1   86221    1.00",
+    "  1   85121    2.00",
+    "  1   24281    3.00",
+    "  1   24381    4.00",
+    "  1   85121    10.00"
+    ])
+rSpec1 = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
+rSpec2 = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] (map (Valence . T.pack . show) [1..8])
+rseq = RecodeSequence rSpec1 rSpec2 (WindowSizeInSecs 6)
+
+
+boom :: RecodeSequence -> [ObservationUnit] -> FoundSequence -> (FoundSequence, [ObservationUnit])
+boom _ [] s = (EmptySequence, [])
+boom recSeq@(RecodeSequence rStart rStop (WindowSizeInSecs winSize)) (o@(ObservationUnit _ (ObservationTime curTime)):os) found =
+    -- if time out, close sequence
+    -- if start recode appears, begin again
+    case found of
+        EmptySequence ->
+            if isMatch rStart o
+            then boom recSeq os (OpenSequence o)
+            else boom recSeq os EmptySequence
+        OpenSequence firstUnit@(ObservationUnit _ (ObservationTime firstTime)) ->
+            if isMatch rStart o 
+            then boom recSeq os (OpenSequence o)  -- if start recode appears, we start over.
+            else 
+                if (curTime - firstTime > winSize)
+                then boom recSeq (o:os) EmptySequence  -- time out -> sequence lost
+                else 
+                    if isMatch rStop o
+                    then (ClosedSequence firstUnit o, os)  -- found the stop code
+                    else boom recSeq os found
+
+
+
+
+sproing :: RecodeSequence -> [ObservationUnit] -> [FoundSequence] -> [FoundSequence]
+sproing _ [] fs = fs
+sproing reqSeq os fs =
+    case boom reqSeq os EmptySequence of 
+        (EmptySequence, rest) -> sproing reqSeq rest fs
+        (closed@(ClosedSequence _ _), rest) -> sproing reqSeq rest (closed:fs)
+
+
+
+-- if new first recode appears, what to do?
+
+
+
+
+
+
+
+--lookForNext :: [RecodeSpec] -> [ObservationUnit] -> Maybe ObservationUnit
+
+
+--nextSequence :: [RecodeSpec] -> [ObservationUnit] -> FindResult -> (FindResult, [ObservationUnit])
+--nextSequence [] os result = (result, os)
+--nextSequence _ [] result = (result, [])
+--nextSequence (r:rs) os (FindResult ros) =
+
+
+--nextSequence :: State -> Maybe FindResult -> State
+--nextSequence (State rSpecs oUnits)
+
+
+--timePassed :: Double -> ObservationUnit -> Double
+
+
+--findRecodeSpec :: Double RecodeSpec WindowSizeInSecs [ObservationUnit] -> FindResult
+--findRecodeSpec _ _ [] = FindResult Nothing []
+--findRecodeSpec startTime rs win ous@(a:as) =
+--    in
+
+--        if win < 0
+--            then FindResult Nothing ous
+--            else
+--                if (isMatch rs a) then
+--                    FindResult Just(a) as
+--                else
+--                    findRecodeSpec rs ()
+
+
+
+--nextMatch :: State -> State
+--nextMatch (State rs os ss@(SequenceMatch sso)) =
+--    case lookFor (head rs) os of
+--        FindResult Nothing os' -> nextMatch (State rs os' ss)
+--        FindResult (Just ou) os' -> nextMatch (State (tail rs) os' (SequenceMatch (ou : sso)))
+
+
+---- 
+
+
+--8lookFor :: RecodeSpec [ObservationUnit]
+--lookFor (head recodeSpec)
+
+
+--isRecodeSpecMatch :: [RecodeSpec] ObservationUnit -> Boolean
+--isRecodeSpecMatch 
+
+
+
+
+
 main = do
     putStrLn("Hello world!")
+
+
+
+-- if (obsCode = startCode) {
+--   curSequence.start = obsCode
+--   next obsCode
+
+--   while (obsCode <= allCodes) {
+--     if (obsCode = endCode) {
+--       curSequence.end = obsCode
+--       validSeqs.add(curSequence)
+--     }
+--     else {
+--       next obsCode    
+--     }
+--   }
+-- }
+-- 
+
+
