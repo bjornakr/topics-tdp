@@ -1,12 +1,20 @@
 #!/usr/bin/env stack
--- stack runghc --resolver lts-11.0 --install-ghc --package text --package safe
+{- stack
+    --resolver lts-11.0 
+    --install-ghc
+    exec ghci 
+    --package text
+    --package safe
+-}
 
+ --runghc
 -- Topics observational data processor
 -- TOPDAP
 
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.Text as T
+import Data.Text.IO as IO (readFile)
 import Data.Text.Read (decimal, rational)
 import Data.Monoid
 import Safe
@@ -231,8 +239,8 @@ isMatch
     (RecodeSpec initiatorSpec contentCodesSpec valencesSpec)
     obsUnit@(ObservationUnit (ObservationCode initiator contentCode _ valence) _) =
         initiator == initiatorSpec
-            && (elem contentCode contentCodesSpec)
-            && (elem valence valencesSpec)
+            && (null contentCodesSpec || elem contentCode contentCodesSpec)
+            && (null valencesSpec || elem valence valencesSpec)
 
 
 --isMatch :: [RecodeSpec] -> ObservationUnit -> Bool
@@ -248,52 +256,68 @@ type StartRecodeSpec = RecodeSpec
 type StopRecodeSpec = RecodeSpec
 --data OpenSequence = OpenSequence [ObservationUnit]
 data RecodeSequence = RecodeSequence StartRecodeSpec StopRecodeSpec WindowSizeInSecs
-data FoundSequence = EmptySequence | OpenSequence ObservationUnit | ClosedSequence ObservationUnit ObservationUnit deriving (Show)
+data FoundSequence = EmptySequence | OpenSequence ObservationUnit | FinishedSequence ObservationUnit ObservationUnit deriving (Show)
 
 
-units = fromRight [] (mapM parseObservationUnit [
-    "  1   24281    0.00",
-    "  1   86221    1.00",
-    "  1   85121    2.00",
-    "  1   24281    3.00",
-    "  1   24381    4.00",
-    "  1   85121    10.00"
-    ])
-rSpec1 = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
-rSpec2 = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] (map (Valence . T.pack . show) [1..8])
-rseq = RecodeSequence rSpec1 rSpec2 (WindowSizeInSecs 6)
 
 
-boom :: RecodeSequence -> [ObservationUnit] -> FoundSequence -> (FoundSequence, [ObservationUnit])
-boom _ [] s = (EmptySequence, [])
-boom recSeq@(RecodeSequence rStart rStop (WindowSizeInSecs winSize)) (o@(ObservationUnit _ (ObservationTime curTime)):os) found =
-    -- if time out, close sequence
-    -- if start recode appears, begin again
+
+isTimedOut :: RecodeSequence -> ObservationUnit -> ObservationUnit -> Bool
+isTimedOut (RecodeSequence _ _ (WindowSizeInSecs winSize))
+            (ObservationUnit _ (ObservationTime startTime))
+            (ObservationUnit _ (ObservationTime curTime)) = curTime - startTime > winSize
+
+
+
+findSequence :: RecodeSequence -> [ObservationUnit] -> FoundSequence -> (FoundSequence, [ObservationUnit])
+findSequence _ [] s = (EmptySequence, [])
+findSequence recSeq@(RecodeSequence rStart rStop _) (o:os) found =
+    let 
+        next = findSequence recSeq
+    in
+
     case found of
         EmptySequence ->
             if isMatch rStart o
-            then boom recSeq os (OpenSequence o)
-            else boom recSeq os EmptySequence
-        OpenSequence firstUnit@(ObservationUnit _ (ObservationTime firstTime)) ->
+            then next os (OpenSequence o)
+            else next os EmptySequence
+        OpenSequence firstUnit ->
             if isMatch rStart o 
-            then boom recSeq os (OpenSequence o)  -- if start recode appears, we start over.
+            then next os (OpenSequence o)  -- if start recode appears, we start over.
             else 
-                if (curTime - firstTime > winSize)
-                then boom recSeq (o:os) EmptySequence  -- time out -> sequence lost
-                else 
-                    if isMatch rStop o
-                    then (ClosedSequence firstUnit o, os)  -- found the stop code
-                    else boom recSeq os found
+
+            if (isTimedOut recSeq firstUnit o)
+            then next (o:os) EmptySequence  -- time out -> sequence lost
+            else 
+
+            if isMatch rStop o
+            then (FinishedSequence firstUnit o, os)  -- found the stop code
+            else next os found
 
 
 
 
-sproing :: RecodeSequence -> [ObservationUnit] -> [FoundSequence] -> [FoundSequence]
-sproing _ [] fs = fs
-sproing reqSeq os fs =
-    case boom reqSeq os EmptySequence of 
-        (EmptySequence, rest) -> sproing reqSeq rest fs
-        (closed@(ClosedSequence _ _), rest) -> sproing reqSeq rest (closed:fs)
+--sproing :: RecodeSequence -> [ObservationUnit] -> [FoundSequence] -> [FoundSequence]
+--sproing _ [] fs = fs
+--sproing reqSeq os fs =
+--    case findSequence reqSeq os EmptySequence of 
+--        (EmptySequence, rest) -> sproing reqSeq rest fs
+--        (finished@(FinishedSequence _ _), rest) -> sproing reqSeq rest (finished:fs)
+
+
+findAllSequences :: RecodeSequence -> [ObservationUnit] -> [FoundSequence]
+findAllSequences reqSeq obsUnits =
+    let
+        proc :: [ObservationUnit] -> [FoundSequence] -> [FoundSequence]
+        proc [] fs = fs
+        proc os fs =
+            case findSequence reqSeq os EmptySequence of 
+                (EmptySequence, rest) -> proc rest fs
+                (finished@(FinishedSequence _ _), rest) -> proc rest (finished:fs)
+    in
+    proc obsUnits []
+
+
 
 
 
@@ -355,12 +379,37 @@ sproing reqSeq os fs =
 
 
 
+units = fromRight [] (mapM parseObservationUnit [
+    "  1   24281    0.00",
+    "  1   86221    1.00",
+    "  1   85121    2.00",
+    "  1   24281    3.00",
+    "  1   24282    4.00",
+    "  1   85121    10.00"
+    ])
+rSpecStart = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
+rSpecStop = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] []
 
+rstart = RecodeSpec (Initiator Parent) [ContentCode "42"] []
+rstop = RecodeSpec (Initiator Child) [ContentCode "01"] []
+
+rseq = RecodeSequence rstart rstop (WindowSizeInSecs 6)
 
 main = do
-    putStrLn("Hello world!")
-
-
+    content <- IO.readFile "1554-36-TH.t1"
+    --putStrLn(show $ T.length content)
+    let az = T.splitOn "\n" content
+    let az2 = (tail . tail) az
+    --putStrLn $ show az2
+    let try = mapM parseObservationUnit az2
+    -- putStrLn(show try)
+    let units2 = fromRight [] (mapM parseObservationUnit az2)
+    --putStrLn("show units2")
+    --putStrLn(show units2)
+    let a = findAllSequences rseq units2
+    putStrLn(show $ length a)
+    putStrLn(show a)
+    putStrLn("Done!")
 
 -- if (obsCode = startCode) {
 --   curSequence.start = obsCode
