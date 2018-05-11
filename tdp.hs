@@ -8,8 +8,9 @@
 -}
 
  --runghc
--- Topics observational data processor
--- TOPDAP
+
+-- Topics Sequence Finder
+-- TOPSEQ
 
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -41,6 +42,8 @@ data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving 
 
 
 data Error = Error T.Text deriving (Show)
+
+
 
 
 -- Header
@@ -250,13 +253,17 @@ isMatch
 --        then True
 --        else isMatch rs obsUnit
 
-data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]
+data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]  -- TODO: must have a valence set with each content code
 data WindowSizeInSecs = WindowSizeInSecs Double
 type StartRecodeSpec = RecodeSpec
 type StopRecodeSpec = RecodeSpec
 --data OpenSequence = OpenSequence [ObservationUnit]
 data RecodeSequence = RecodeSequence StartRecodeSpec StopRecodeSpec WindowSizeInSecs
-data FoundSequence = EmptySequence | OpenSequence ObservationUnit | FinishedSequence ObservationUnit ObservationUnit deriving (Show)
+data FoundSequence = 
+    EmptySequence | 
+    OpenSequence ObservationUnit | 
+    FinishedSequence ObservationUnit ObservationUnit |
+    TimedOutSequence ObservationUnit deriving (Show)
 
 
 
@@ -287,7 +294,8 @@ findSequence recSeq@(RecodeSequence rStart rStop _) (o:os) found =
             else 
 
             if (isTimedOut recSeq firstUnit o)
-            then next (o:os) EmptySequence  -- time out -> sequence lost
+            then (TimedOutSequence firstUnit, (o:os))    -- time out -> sequence lost
+            -- then next (o:os) EmptySequence  -- time out -> sequence lost
             else 
 
             if isMatch rStop o
@@ -313,6 +321,7 @@ findAllSequences reqSeq obsUnits =
         proc os fs =
             case findSequence reqSeq os EmptySequence of 
                 (EmptySequence, rest) -> proc rest fs
+                (timedOut@(TimedOutSequence _), rest) -> proc rest (timedOut:fs)
                 (finished@(FinishedSequence _ _), rest) -> proc rest (finished:fs)
     in
     proc obsUnits []
@@ -395,10 +404,39 @@ rstop = RecodeSpec (Initiator Child) [ContentCode "01"] []
 
 rseq = RecodeSequence rstart rstop (WindowSizeInSecs 6)
 
+data FinishedSequenceCount = FinishedSequenceCount Int deriving (Show)
+data TimedOutSequenceCount = TimedOutSequenceCount Int deriving (Show)
+data ReportName = ReportName String deriving (Show)
+data ReportId = ReportId ReportName ChildId Task deriving (Show)
+data Report = Report ReportId FinishedSequenceCount TimedOutSequenceCount deriving (Show)
+
+
+-- data Header = Header Task ChildId AgeInMonths Observer Family deriving (Show)
+createReportId :: ReportName -> Header -> ReportId
+createReportId name (Header task childId age _ _) =
+    ReportId name childId task
+
+
+makeReport :: [FoundSequence] -> ReportId -> Report
+makeReport found reportId =
+    let
+        proc [] r = r
+        proc (f:fs) r@(Report rId fc@(FinishedSequenceCount i) tc@(TimedOutSequenceCount j)) =
+            case f of
+                (FinishedSequence _ _) -> proc fs (Report rId (FinishedSequenceCount (i+1)) tc)
+                (TimedOutSequence _) -> proc fs (Report rId fc (TimedOutSequenceCount (j+1)))
+                _ -> proc fs r
+    in
+        proc found (Report reportId (FinishedSequenceCount 0) (TimedOutSequenceCount 0))
+
+
+
 main = do
     content <- IO.readFile "1554-36-TH.t1"
     --putStrLn(show $ T.length content)
     let az = T.splitOn "\n" content
+    let hdrStr = (head . tail) az
+    let hdr = parseHeader hdrStr
     let az2 = (tail . tail) az
     --putStrLn $ show az2
     let try = mapM parseObservationUnit az2
@@ -407,8 +445,23 @@ main = do
     --putStrLn("show units2")
     --putStrLn(show units2)
     let a = findAllSequences rseq units2
-    putStrLn(show $ length a)
-    putStrLn(show a)
+    putStrLn(show $ length a)    
+    -- putStrLn(show $ length (filter (_ typeOf TimedOutSequence) a))
+    -- putStrLn(show a)
+    -- putStrLn(show (makeReport a (ReportId (ReportName "POS_DIR_WITH_COMP") (ChildId 123) (Task1))))
+
+    let zamba = do
+        hdr <- parseHeader hdrStr
+        units <- mapM parseObservationUnit az2
+        return (hdr, units)
+
+    case zamba of
+        Left (Error msg) -> error (T.unpack msg)
+        Right (hdr, units) -> do
+            let a = findAllSequences rseq units
+            putStrLn(show (makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)))
+
+    
     putStrLn("Done!")
 
 -- if (obsCode = startCode) {

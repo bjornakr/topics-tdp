@@ -1,5 +1,5 @@
-TSF: Topics Sequence Finder
-===========================
+TOPSEQ: Topics Sequence Finder
+==============================
 This script locates sequences in raw topics code files. For more information, see *"Compliance Chains from BONDS TOPICS micro social coding"* by Kristin Nordahl.
 
 Make note of the following premises:
@@ -8,7 +8,7 @@ Make note of the following premises:
 
 
 ## Prerequisites:
-You need The Haskell Tool Stack >= Version 1.6.5. Download the lates version here: https://docs.haskellstack.org/
+You need The Haskell Tool Stack >= Version 1.6.5. Download the latest version here: https://docs.haskellstack.org/
 
 ## Usage
 
