@@ -45,23 +45,6 @@ data Error = Error T.Text deriving (Show)
 
 
 
-
--- Header
---Task ChildID Age      Observer    FMembers        Date     Time   dbl_int is_cut                                 
--- 1   1366    12       OV          13              08/13/10 15:18  1       0
-
---Data
-  --0  -00100    40.0
-  --1   17232    40.03
-  --1   38112    42.2
-  --1   17232    42.6
-  --1   34112    43.56
-  --1   17232    44.13
-  --1   34112    46.46
-  --1   17232    47.03
-  --1   31112    49.76
-
-
 validContentCodes = [
     "00", "01", "03", "11", "12", "13", "21", "22", "23",
     "31", "32", "33", "41", "42", "43", "51", "53", "62",
@@ -125,7 +108,6 @@ parseObservationTime val =
 
 
 parseObservationUnit :: T.Text -> Either Error ObservationUnit
--- input e.g:   1   34112    46.46
 parseObservationUnit val =
     let 
         parts = T.words val
@@ -140,12 +122,6 @@ parseObservationUnit val =
                 Just v -> parseObservationTime v
 
         return $ ObservationUnit oc ot
-
-
-
-
-
-
 
 
 
@@ -218,25 +194,6 @@ parseHeader val =
 
 
 
----data RecodeSequence = RecodeSequence WindowSizeInSecs [RecodeSpec]
---data SequenceMatch = SequenceMatch [ObservationUnit]
-
-
-
-
---rseq = RecodeSequence (WindowSizeInSecs 6) [rSpec1, rSpec2]
-
---data State = State [RecodeSpec] [ObservationUnit] -- SequenceMatch
---data FindResult = FindResult [ObservationUnit]
-
-
--- data FindSpec = RecodeSpec WindowSizeInSecs [ObservationUnit]
-
--- data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving (Show)
-
--- data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence deriving (Show)
-
-
 isMatch :: RecodeSpec -> ObservationUnit -> Bool
 isMatch 
     (RecodeSpec initiatorSpec contentCodesSpec valencesSpec)
@@ -246,26 +203,17 @@ isMatch
             && (null valencesSpec || elem valence valencesSpec)
 
 
---isMatch :: [RecodeSpec] -> ObservationUnit -> Bool
---isMatch [] _ = False
---isMatch (r:rs) ou = 
---    if isMatch r ou
---        then True
---        else isMatch rs obsUnit
 
 data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]  -- TODO: must have a valence set with each content code
 data WindowSizeInSecs = WindowSizeInSecs Double
 type StartRecodeSpec = RecodeSpec
 type StopRecodeSpec = RecodeSpec
---data OpenSequence = OpenSequence [ObservationUnit]
 data RecodeSequence = RecodeSequence StartRecodeSpec StopRecodeSpec WindowSizeInSecs
 data FoundSequence = 
     EmptySequence | 
     OpenSequence ObservationUnit | 
     FinishedSequence ObservationUnit ObservationUnit |
     TimedOutSequence ObservationUnit deriving (Show)
-
-
 
 
 
@@ -294,8 +242,7 @@ findSequence recSeq@(RecodeSequence rStart rStop _) (o:os) found =
             else 
 
             if (isTimedOut recSeq firstUnit o)
-            then (TimedOutSequence firstUnit, (o:os))    -- time out -> sequence lost
-            -- then next (o:os) EmptySequence  -- time out -> sequence lost
+            then (TimedOutSequence firstUnit, (o:os))    -- time out
             else 
 
             if isMatch rStop o
@@ -303,14 +250,6 @@ findSequence recSeq@(RecodeSequence rStart rStop _) (o:os) found =
             else next os found
 
 
-
-
---sproing :: RecodeSequence -> [ObservationUnit] -> [FoundSequence] -> [FoundSequence]
---sproing _ [] fs = fs
---sproing reqSeq os fs =
---    case findSequence reqSeq os EmptySequence of 
---        (EmptySequence, rest) -> sproing reqSeq rest fs
---        (finished@(FinishedSequence _ _), rest) -> sproing reqSeq rest (finished:fs)
 
 
 findAllSequences :: RecodeSequence -> [ObservationUnit] -> [FoundSequence]
@@ -329,73 +268,6 @@ findAllSequences reqSeq obsUnits =
 
 
 
-
--- if new first recode appears, what to do?
-
-
-
-
-
-
-
---lookForNext :: [RecodeSpec] -> [ObservationUnit] -> Maybe ObservationUnit
-
-
---nextSequence :: [RecodeSpec] -> [ObservationUnit] -> FindResult -> (FindResult, [ObservationUnit])
---nextSequence [] os result = (result, os)
---nextSequence _ [] result = (result, [])
---nextSequence (r:rs) os (FindResult ros) =
-
-
---nextSequence :: State -> Maybe FindResult -> State
---nextSequence (State rSpecs oUnits)
-
-
---timePassed :: Double -> ObservationUnit -> Double
-
-
---findRecodeSpec :: Double RecodeSpec WindowSizeInSecs [ObservationUnit] -> FindResult
---findRecodeSpec _ _ [] = FindResult Nothing []
---findRecodeSpec startTime rs win ous@(a:as) =
---    in
-
---        if win < 0
---            then FindResult Nothing ous
---            else
---                if (isMatch rs a) then
---                    FindResult Just(a) as
---                else
---                    findRecodeSpec rs ()
-
-
-
---nextMatch :: State -> State
---nextMatch (State rs os ss@(SequenceMatch sso)) =
---    case lookFor (head rs) os of
---        FindResult Nothing os' -> nextMatch (State rs os' ss)
---        FindResult (Just ou) os' -> nextMatch (State (tail rs) os' (SequenceMatch (ou : sso)))
-
-
----- 
-
-
---8lookFor :: RecodeSpec [ObservationUnit]
---lookFor (head recodeSpec)
-
-
---isRecodeSpecMatch :: [RecodeSpec] ObservationUnit -> Boolean
---isRecodeSpecMatch 
-
-
-
-units = fromRight [] (mapM parseObservationUnit [
-    "  1   24281    0.00",
-    "  1   86221    1.00",
-    "  1   85121    2.00",
-    "  1   24281    3.00",
-    "  1   24282    4.00",
-    "  1   85121    10.00"
-    ])
 rSpecStart = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
 rSpecStop = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] []
 
@@ -463,21 +335,5 @@ main = do
 
     
     putStrLn("Done!")
-
--- if (obsCode = startCode) {
---   curSequence.start = obsCode
---   next obsCode
-
---   while (obsCode <= allCodes) {
---     if (obsCode = endCode) {
---       curSequence.end = obsCode
---       validSeqs.add(curSequence)
---     }
---     else {
---       next obsCode    
---     }
---   }
--- }
--- 
 
 
