@@ -15,7 +15,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.Text as T
-import Data.Text.IO as IO (readFile)
+import Data.Text.IO as IO (readFile, writeFile)
 import Data.Text.Read (decimal, rational)
 import Data.Monoid
 import Safe
@@ -278,7 +278,7 @@ rseq = RecodeSequence rstart rstop (WindowSizeInSecs 6)
 
 data FinishedSequenceCount = FinishedSequenceCount Int deriving (Show)
 data TimedOutSequenceCount = TimedOutSequenceCount Int deriving (Show)
-data ReportName = ReportName String deriving (Show)
+data ReportName = ReportName T.Text deriving (Show)
 data ReportId = ReportId ReportName ChildId Task deriving (Show)
 data Report = Report ReportId FinishedSequenceCount TimedOutSequenceCount deriving (Show)
 
@@ -302,8 +302,83 @@ makeReport found reportId =
         proc found (Report reportId (FinishedSequenceCount 0) (TimedOutSequenceCount 0))
 
 
+mapTaskToText :: Task -> T.Text
+mapTaskToText t =
+    let proc Task1 = "1"
+        proc Task2 = "2"
+        proc Task3a = "3a"
+        proc Task3b = "3b"
+        proc Task4 = "4"
+        proc Task5 = "5" in
+    T.pack $ (proc t)
+
+
+mapReportToLine :: Report -> T.Text
+mapReportToLine (Report 
+                    (ReportId (ReportName name) (ChildId childId) task)
+                    (FinishedSequenceCount fsCount)
+                    (TimedOutSequenceCount toCount)) =
+    let ps = T.pack . show in 
+        T.intercalate ";" [name, ps childId, mapTaskToText task, ps fsCount, ps toCount]
+
+
+    --T.pack(
+    --    name ++ "\t" ++
+    --    (show childId)) ++ "\t" ++
+    --    (mapTaskToString task)  ++ "\t" ++
+    --    (show fsCount) ++ "\t" ++
+    --    (show toCount)
+
+
+processFile :: FilePath -> IO Report
+processFile filePath = do
+    content <- IO.readFile filePath
+    let lines0 = T.splitOn "\n" content
+    let hdrStr = (head . tail) lines0
+    let hdr = parseHeader hdrStr
+    let data0 = (tail . tail) lines0
+
+    let parse = do
+        hdr <- parseHeader hdrStr
+        units <- mapM parseObservationUnit data0
+        return (hdr, units)
+
+    let report = case parse of
+                Left (Error msg) -> error (T.unpack msg)
+                Right (hdr, units) -> do
+                    let a = findAllSequences rseq units
+                    --putStrLn(show (makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)))
+                    makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)
+    
+    return report
+    --putStrLn("Done!")
+
+
+readFileList :: FilePath -> IO [FilePath]
+readFileList fpath = do 
+    content <- IO.readFile fpath
+    let filePaths = lines (T.unpack content)
+    return filePaths
+
+writeOutputFile :: T.Text -> IO ()
+writeOutputFile content = do
+    IO.writeFile "output.csv" content
+    --outh <- IO.openFile "output.csv" WriteMode
+    --hPutStrLn(T.unpack content)
+
 
 main = do
+    -- let fileList = ["1554-36-TH.t1", "1554-36-TH.t1"]
+    fileList <- readFileList "filelist.txt"
+    reports <- mapM processFile fileList
+    let reportStrings = fmap mapReportToLine reports
+    let fullString = T.unlines reportStrings
+    IO.writeFile "output.csv" fullString
+    putStrLn $ show reportStrings
+
+    putStrLn("Done!")
+
+mainold = do
     content <- IO.readFile "1554-36-TH.t1"
     --putStrLn(show $ T.length content)
     let az = T.splitOn "\n" content
