@@ -1,4 +1,4 @@
-#!/usr/bin/env stack
+-- #!/usr/bin/env stack
 {- stack
     --resolver lts-11.0 
     --install-ghc
@@ -15,11 +15,28 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import qualified Data.Text as T
+import System.IO
 import Data.Text.IO as IO (readFile, writeFile)
 import Data.Text.Read (decimal, rational)
 import Data.Monoid
 import Safe
 import Data.Either
+
+
+
+-- CONFIGURABLE PART: You are expected to change these values.
+
+-- 1) Write the name of the report.
+reportName = ReportName("TEST_REPORT")
+
+-- 2) Define the sequence. See README.md for details.
+seqStart = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
+seqStop = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] []
+rseq = RecodeSequence seqStart seqStop (WindowSizeInSecs 6)
+
+--- END CONFIG
+
+
 
 data Task = Task1 | Task2 | Task3a | Task3b | Task4 | Task5 deriving (Show)
 data ChildId = ChildId Int deriving (Show)
@@ -36,10 +53,8 @@ data ContentCode = ContentCode T.Text deriving (Show, Eq)
 data Reciprocator = Reciprocator Subject | ReciprocatorObject deriving (Show)
 data Valence = Valence T.Text deriving (Show, Eq) -- a number in the range [1,8]
 data ObservationTime = ObservationTime Double deriving (Show)
-data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence deriving (Show)
+data ObservationCode = ObservationCode Initiator ContentCode Reciprocator Valence | ControlCode deriving (Show)
 data ObservationUnit = ObservationUnit ObservationCode ObservationTime deriving (Show)
-
-
 
 data Error = Error T.Text deriving (Show)
 
@@ -84,6 +99,8 @@ parseValence val =
         else Left $ Error ("Invalid Valence: " <> val <> ".")
 
 parseObservationCode :: T.Text -> Either Error ObservationCode
+parseObservationCode "-00100" = Right ControlCode
+parseObservationCode "-00500" = Right ControlCode
 parseObservationCode val =
     let
         proc :: String -> Either Error ObservationCode
@@ -195,6 +212,7 @@ parseHeader val =
 
 
 isMatch :: RecodeSpec -> ObservationUnit -> Bool
+isMatch _ (ObservationUnit ControlCode _) = False
 isMatch 
     (RecodeSpec initiatorSpec contentCodesSpec valencesSpec)
     obsUnit@(ObservationUnit (ObservationCode initiator contentCode _ valence) _) =
@@ -204,7 +222,7 @@ isMatch
 
 
 
-data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]  -- TODO: must have a valence set with each content code
+data RecodeSpec = RecodeSpec Initiator [ContentCode] [Valence]
 data WindowSizeInSecs = WindowSizeInSecs Double
 type StartRecodeSpec = RecodeSpec
 type StopRecodeSpec = RecodeSpec
@@ -268,13 +286,13 @@ findAllSequences reqSeq obsUnits =
 
 
 
-rSpecStart = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
-rSpecStop = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] []
+--rSpecStart = RecodeSpec (Initiator Parent) [ContentCode "42"] [Valence "1", Valence "2", Valence "3"]
+--rSpecStop = RecodeSpec (Initiator Child) [ContentCode "01", ContentCode "51"] []
 
-rstart = RecodeSpec (Initiator Parent) [ContentCode "42"] []
-rstop = RecodeSpec (Initiator Child) [ContentCode "01"] []
+--rstart = RecodeSpec (Initiator Parent) [ContentCode "42"] []
+--rstop = RecodeSpec (Initiator Child) [ContentCode "01"] []
 
-rseq = RecodeSequence rstart rstop (WindowSizeInSecs 6)
+--rseq = RecodeSequence rstart rstop (WindowSizeInSecs 6)
 
 data FinishedSequenceCount = FinishedSequenceCount Int deriving (Show)
 data TimedOutSequenceCount = TimedOutSequenceCount Int deriving (Show)
@@ -322,12 +340,15 @@ mapReportToLine (Report
         T.intercalate ";" [name, ps childId, mapTaskToText task, ps fsCount, ps toCount]
 
 
-    --T.pack(
-    --    name ++ "\t" ++
-    --    (show childId)) ++ "\t" ++
-    --    (mapTaskToString task)  ++ "\t" ++
-    --    (show fsCount) ++ "\t" ++
-    --    (show toCount)
+
+
+bop :: [Either Error ObservationUnit] -> [ObservationUnit]
+bop [] = []
+bop (e:es) =
+    case e of
+        Left _ -> bop(es)
+        Right o -> o:(bop(es))
+
 
 
 processFile :: FilePath -> IO Report
@@ -337,78 +358,38 @@ processFile filePath = do
     let hdrStr = (head . tail) lines0
     let hdr = parseHeader hdrStr
     let data0 = (tail . tail) lines0
+    let data1 = filter (\t -> t /= T.empty) data0
 
     let parse = do
         hdr <- parseHeader hdrStr
-        units <- mapM parseObservationUnit data0
+        let units = bop $ map parseObservationUnit data1
+        -- units <- mapM parseObservationUnit data1
         return (hdr, units)
 
     let report = case parse of
                 Left (Error msg) -> error (T.unpack msg)
                 Right (hdr, units) -> do
                     let a = findAllSequences rseq units
-                    --putStrLn(show (makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)))
-                    makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)
+                    makeReport a (createReportId reportName hdr)
     
     return report
-    --putStrLn("Done!")
 
 
-readFileList :: FilePath -> IO [FilePath]
-readFileList fpath = do 
-    content <- IO.readFile fpath
-    let filePaths = lines (T.unpack content)
+readFileList :: FilePath -> IO [T.Text]
+readFileList filePath = do 
+    content <- IO.readFile filePath
+    let filePaths = T.lines content
     return filePaths
-
-writeOutputFile :: T.Text -> IO ()
-writeOutputFile content = do
-    IO.writeFile "output.csv" content
-    --outh <- IO.openFile "output.csv" WriteMode
-    --hPutStrLn(T.unpack content)
 
 
 main = do
-    -- let fileList = ["1554-36-TH.t1", "1554-36-TH.t1"]
-    fileList <- readFileList "filelist.txt"
-    reports <- mapM processFile fileList
+    fileListHandle <- openFile "filelist.txt" ReadMode
+    fileList <- hGetContents fileListHandle
+    --fileList <- readFileList "filelist.txt"
+    reports <- mapM processFile (lines fileList)
     let reportStrings = fmap mapReportToLine reports
     let fullString = T.unlines reportStrings
     IO.writeFile "output.csv" fullString
     putStrLn $ show reportStrings
-
+    hClose fileListHandle
     putStrLn("Done!")
-
-mainold = do
-    content <- IO.readFile "1554-36-TH.t1"
-    --putStrLn(show $ T.length content)
-    let az = T.splitOn "\n" content
-    let hdrStr = (head . tail) az
-    let hdr = parseHeader hdrStr
-    let az2 = (tail . tail) az
-    --putStrLn $ show az2
-    let try = mapM parseObservationUnit az2
-    -- putStrLn(show try)
-    let units2 = fromRight [] (mapM parseObservationUnit az2)
-    --putStrLn("show units2")
-    --putStrLn(show units2)
-    let a = findAllSequences rseq units2
-    putStrLn(show $ length a)    
-    -- putStrLn(show $ length (filter (_ typeOf TimedOutSequence) a))
-    -- putStrLn(show a)
-    -- putStrLn(show (makeReport a (ReportId (ReportName "POS_DIR_WITH_COMP") (ChildId 123) (Task1))))
-
-    let zamba = do
-        hdr <- parseHeader hdrStr
-        units <- mapM parseObservationUnit az2
-        return (hdr, units)
-
-    case zamba of
-        Left (Error msg) -> error (T.unpack msg)
-        Right (hdr, units) -> do
-            let a = findAllSequences rseq units
-            putStrLn(show (makeReport a (createReportId (ReportName "POS_DIR_WITH_COMP") hdr)))
-
-    
-    putStrLn("Done!")
-
-
